@@ -1,0 +1,61 @@
+name: CD Deploy AWS
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_ref:
+        description: 'Docker image'
+        required: true
+        default: '20fumar/go-fibonacci-api:latest'
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_SSH_KEY }}" > ~/.ssh/aws_key.pem
+          chmod 600 ~/.ssh/aws_key.pem
+
+      - name: Deploy Application
+        run: |
+          HOST="3.75.199.51"
+          USER="ec2-user"
+          HOST_PORT="80"
+          CONTAINER_PORT="8080"
+
+          ssh -i ~/.ssh/aws_key.pem \
+              -o StrictHostKeyChecking=no \
+              ${USER}@${HOST} \
+              "IMAGE_REF='${{ inputs.image_ref }}' \
+               HOST_PORT='${HOST_PORT}' \
+               CONTAINER_PORT='${CONTAINER_PORT}' \
+               bash -s" << 'EOF'
+
+          set -e
+
+          echo "Pulling latest image..."
+          docker pull ${IMAGE_REF}
+
+          echo "Stopping old container..."
+          docker ps -q --filter "publish=${HOST_PORT}" | xargs -r docker stop
+
+          echo "Removing old container..."
+          docker ps -aq --filter "publish=${HOST_PORT}" | xargs -r docker rm
+
+          echo "Starting new container..."
+          docker run -d \
+            --restart unless-stopped \
+            -p ${HOST_PORT}:${CONTAINER_PORT} \
+            --name go-fibonacci-api \
+            ${IMAGE_REF}
+
+          echo "Deployment completed."
+
+          echo "Running containers:"
+          docker ps
+
+          EOF
